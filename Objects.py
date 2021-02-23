@@ -6,14 +6,15 @@ from NerPy import Neuropy
 import pandas as pd
 from time import sleep
 import numpy as np
+import multiprocessing as mp
 global neuropy
 neuropy = Neuropy("COM5",57600) 
 import datetime as dt
 class dataObject():
     def __init__(self):
         neuropy.start()
-        self.queue = []
-        self.queueSize = 30
+        self.queue = mp.Queue()
+        self.queueSize = 10
         self.attention = 0
         self.meditation = 0
         self.rawValue = 0
@@ -27,12 +28,12 @@ class dataObject():
         self.midGamma = 0
         self.poorSignal = 0
         self.blinkStrength = 0
-
+        self.threads = []
 
         neuropy.setCallBack("attention", self.attention_callback)
 
     def attention_callback(self, attention_value):
-        self.attention = attention_value
+        self.attention = neuropy.attention
         self.meditation = neuropy.meditation
         self.rawValue = neuropy.rawValue
         self.delta = neuropy.delta
@@ -46,10 +47,14 @@ class dataObject():
         self.add_to_queue()
     
     def add_to_queue(self):
-        print("adding values to queue", self.theta)
-        self.queue.append([float(self.attention),
+        #print("adding values to queue", self.theta)
+        if self.rawValue > 10000:
+            rawValue = self.rawValue/10000
+        else:
+            rawValue = self.rawValue
+        self.queue.put([float(self.attention),
         float(self.meditation ),
-        float(self.rawValue ),
+        float(rawValue ),
         float(self.delta ),
         float(self.theta ),
         float(self.lowAlpha ),
@@ -58,11 +63,12 @@ class dataObject():
         float(self.highBeta ),
         float(self.lowGamma ),
         float(self.midGamma)])
-        if len(self.queue) > self.queueSize:
-            self.queue.pop(0)
-            print("the queue is full")
+        if self.queue.qsize() > self.queueSize:
+            self.queue.pop()
+            #print("the queue is full")
 
     def get_queue(self):
+
         tmp = np.array(self.queue)
         df = pd.DataFrame({"Attention":tmp[:,0],
             "Meditation":tmp[:,1],
@@ -78,8 +84,50 @@ class dataObject():
             })
         return df
 
+    def showqueue(self):
+        print(self.queue)
+
+    def showGraphThread(self, labels: dict, interval=1000):
+        
+        graphThread = mp.Process(target=self.showGraph, args=(labels, interval))
+        graphThread.start()
+        self.threads.append(graphThread)
+
+    def showGraph(self, labels: dict, interval=1000):
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+        '''Shows specified labels (columns) from the dict on the graph'''
+        print("showing graph")
+        fig = plt.figure()
+        ax1 = fig.add_subplot(1,1,1)
+
+        def animate(i):
+
+            ax1.clear()
+            ax1.set_ylabel("Activity Frequencies%")
+            ax1.set_xlabel("Readings")
+            que = self.get_queue()
+
+            for val in labels:
+                
+                xs,ys = list(range(0,len(que[val]))),que[val]
+                print(val)
+                ax1.plot(xs, ys)
+            plt.legend(labels, loc='upper left', bbox_to_anchor=(0.25, 0.85))
+        ani = animation.FuncAnimation(fig, animate, interval=interval)
+        plt.show()
+        return ani
+
 def NormalizeData(data):
     return (data - np.min(data)) / (np.max(data) - np.min(data))
+
+
+
+
+
+
+
+
 
 if __name__ == '__main__':
     '''Test the objects by showing data'''
@@ -87,41 +135,18 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import matplotlib.animation as animation
     from matplotlib import style
-    import keyboard
     obj = dataObject()
     #obj.plot()
     import matplotlib.pyplot as plt
     import numpy as np
+    
+    data = dataObject()
+    while data.queue.qsize() < 10:
+        sleep(0.2)
+    print("live")
 
-    f = 1
-    while f !=0:
-        sleep(0.5)
-        if keyboard.is_pressed('1'):
-            print ('Option 1\n')
-            break
-    fig = plt.figure()
-    ax1 = fig.add_subplot(1,1,1)
-    labels = []
-    def animate(i):
-        labels = []
-        ax1.clear()
-        ax1.set_ylabel("Activity Frequencies%")
-        ax1.set_xlabel("Readings")
-        que = obj.get_queue()
-        for i, val in enumerate(que):
-            if i %2 == 0:
-                continue
-            print(que[val])
-            labels.append(val)
-            xs,ys = list(range(0,len(que[val]))),NormalizeData(que[val])
-            ax1.plot(xs, ys)
-        plt.legend(labels, loc='upper left', bbox_to_anchor=(0.25, 0.85))
-
-
-
-    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
-    ani = animation.FuncAnimation(fig, animate, interval=1000)
-    plt.show()
+    data.showGraphThread({"Attention"}, interval=1000)
+    data.showGraph({"Meditation"}, interval=1000)
     while True:
         #game loop
         # for event in pygame.event.get():
